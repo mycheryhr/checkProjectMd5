@@ -34,7 +34,7 @@ def get_file_md5_via_ssh(info):
     project, host, path = info
     if ssh_key:
         # 使用key文件进行连接
-        logging.debug('use ssh key')
+        logging.info('use ssh key')
         key = paramiko.RSAKey.from_private_key_file(ssh_key)
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -42,13 +42,13 @@ def get_file_md5_via_ssh(info):
         ssh.connect(host, ssh_port, ssh_user, pkey=key)
     else:
         # 使用密码连接
-        logging.debug('use password')
+        logging.info('use password')
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(host, ssh_port, ssh_user, ssh_password)
 
     # shell命令：查找项目目录下所有文件，忽略自定义的目录和文件，再计算每个文件的md5，最后按文件全路径名排序
-    command = 'find %s %s -prune -o -type f -print | xargs -i -P10 md5sum {}|sort -k2' % (path, ignore_format)
+    command = 'find %s %s -prune -o -type f -print | xargs -i -P10 md5sum {}' % (path, ignore_format)
 
     stdin, stdout, stderr = ssh.exec_command(command)
     sshstdout = stdout.read()
@@ -56,7 +56,7 @@ def get_file_md5_via_ssh(info):
         return project, host, sshstdout
     else:
         sshstderr = stderr.read()
-        logging.error('ssh execute command error : {}'.format(sshstderr))
+        #logging.error('ssh execute command error : {}'.format(sshstderr))
         return project, host, sshstderr
 
 
@@ -64,6 +64,7 @@ if __name__ == "__main__":
     script_path = cur_file_dir()
 
     # level定义日志输出的最低等级，ERROR表示只输出错误信息，DEBUG可以输出更全信息。filename为日志文件位置，默认同此脚本在一个目录
+    #logging.basicConfig(level=logging.ERROR,
     logging.basicConfig(level=logging.ERROR,
                         format='%(asctime)s %(filename)s %(levelname)s %(message)s',
                         filename=os.path.join(script_path, 'my.log'),
@@ -122,7 +123,7 @@ if __name__ == "__main__":
             print 'Miss Project\'s Host Or Path'
             sys.exit(2)
 
-    logging.debug('queue size %s' % q.qsize())
+    logging.info('queue size %s' % q.qsize())
 
     def consumer(q, result):
         # 队列消费函数
@@ -131,8 +132,13 @@ if __name__ == "__main__":
             logging.debug('get work')
             try:
                 project, host, output = get_file_md5_via_ssh(work)
-            except:
-                pass
+                logging.info('{} {} {}'.format(project, host, len(output)))
+                output = '\n'.join(sorted(output.split('\n')))
+
+            except Exception, e:
+                print e
+                q.task_done()
+                sys.exit(2)
 
             result[project][host] = {}
 
@@ -160,6 +166,7 @@ if __name__ == "__main__":
 
     for p, v in result.items():
         md5_list = [(h, mv['md5']) for h, mv in v.items()]
+        logging.info('string md5 {}'.format(md5_list))
         if len(md5_list) > 1:
             for h, m in md5_list:
                 # 找出项目内与其他主机不同的MD5值. MD5值不同表示ssh输出的所有文件MD5中有与其他主机不相同的地方
@@ -169,5 +176,8 @@ if __name__ == "__main__":
                     # 进一步查找具体不同的文件
                     all_file_md5 = [(h2, mv['output'].split('\n')) for h2, mv in v.items()]
                     same_file = reduce(lambda x, y: set(x) & set(y), [i[1] for i in all_file_md5])
+                    logging.debug('same file {}'.format(same_file))
                     for hn, output in all_file_md5:
+                        logging.debug('number of output {}'.format(output))
                         logging.error('>>>> Project: [{}] Host: [{}] File: {}'.format(p, hn, list(set(output) - set(same_file))))
+
