@@ -204,7 +204,10 @@ if __name__ == "__main__":
                 for host, files_md5_list in hosts_files_md5:
                     with open(report_file, 'a') as ff:
                         difference_file = list(set(files_md5_list) - set(same_file))
+                        print type(difference_file)
                         ff.write('Host: {}\n'.format(host))
-                        ff.writelines(difference_file)
+                        for line in difference_file:
+                            ff.write(line)
+                            ff.write('\n')
                         ff.write('\n'*2)
                         logging.error('>>>> Project: [{}] Host: [{}] File: {}'.format(project, host, difference_file))
