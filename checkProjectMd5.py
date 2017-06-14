@@ -6,6 +6,7 @@ import os
 import sys
 import hashlib
 import logging
+import datetime
 import paramiko
 import ConfigParser
 from Queue import Queue
@@ -164,20 +165,46 @@ if __name__ == "__main__":
 
     q.join()
 
-    for p, v in result.items():
-        md5_list = [(h, mv['md5']) for h, mv in v.items()]
-        logging.info('string md5 {}'.format(md5_list))
-        if len(md5_list) > 1:
-            for h, m in md5_list:
-                # 找出项目内与其他主机不同的MD5值. MD5值不同表示ssh输出的所有文件MD5中有与其他主机不相同的地方
-                if [x[1] for x in md5_list].count(m) <= 1:
-                    logging.error('find different md5! Project: [{}] Host: [{}] MD5:[{}]'.format(p, h, m))
+    # 报告目录名称
+    report_path = 'report_{}'.format(datetime.datetime.now().strftime('%F_%T'))
 
-                    # 进一步查找具体不同的文件
-                    all_file_md5 = [(h2, mv['output'].split('\n')) for h2, mv in v.items()]
-                    same_file = reduce(lambda x, y: set(x) & set(y), [i[1] for i in all_file_md5])
-                    logging.debug('same file {}'.format(same_file))
-                    for hn, output in all_file_md5:
-                        logging.debug('number of output {}'.format(output))
-                        logging.error('>>>> Project: [{}] Host: [{}] File: {}'.format(p, hn, list(set(output) - set(same_file))))
+    for project, project_info in result.items():
 
+        # 报告的文件名称
+        report_file = os.path.join(script_path, report_path, project)
+
+        # 汇集同项目各结点的MD5码
+        hosts_md5_list = [i['md5'] for i in project_info.values()]
+
+        # 项目存在两个结节才进行检查
+        if len(hosts_md5_list) > 1:
+            project_problem = False
+            for i in hosts_md5_list:
+                if hosts_md5_list.count(i) != len(hosts_md5_list):
+                    # 如果不是每一个MD5值都相等, 则认为项目存在问题
+                    project_problem = True
+                    break
+
+            if project_problem:
+                logging.error('find different md5! Project: [{}]'.format(project))
+
+                # 创建报告目录和文件
+                if not os.path.isdir(report_path):
+                    os.mkdir(report_path)
+                if not os.path.isfile(report_file):
+                    os.mknod(report_file)
+
+                # 汇集项目下结点返回的所有文件MD5
+                hosts_files_md5 = [(k, i['output'].split('\n')) for k, i in project_info.items()]
+
+                # 计算出每个结点下共有的文件
+                same_file = reduce(lambda x, y: list(set(x) & set(y)), [i[1] for i in hosts_files_md5])
+
+                # 结点所有文件减共有文件即为差异文件, 将其输出到日志和报告
+                for host, files_md5_list in hosts_files_md5:
+                    with open(report_file, 'a') as ff:
+                        difference_file = list(set(files_md5_list) - set(same_file))
+                        ff.write('Host: {}\n'.format(host))
+                        ff.writelines(difference_file)
+                        ff.write('\n'*2)
+                        logging.error('>>>> Project: [{}] Host: [{}] File: {}'.format(project, host, difference_file))
